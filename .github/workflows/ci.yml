@@ -1,0 +1,58 @@
+name: CI — Scanner Self-Test
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: ["**"]
+
+jobs:
+  test:
+    name: Run scanner tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Scanner catches malicious file
+        run: |
+          echo "Testing detection of known malicious patterns..."
+          if python scan.py tests/test_malicious.sh --json | python -c "
+          import json, sys
+          data = json.load(sys.stdin)
+          assert data['summary']['total'] > 0, 'Expected findings but got 0'
+          assert data['summary']['critical'] > 0, 'Expected critical findings'
+          print(f\"✓ Detected {data['summary']['total']} threats ({data['summary']['critical']} critical)\")
+          "; then
+            echo "✓ Malicious file correctly detected"
+          else
+            echo "✕ Scanner failed to detect malicious patterns"
+            exit 1
+          fi
+
+      - name: Scanner passes clean file
+        run: |
+          echo "Testing clean file produces no findings..."
+          python scan.py tests/test_clean.py --json | python -c "
+          import json, sys
+          data = json.load(sys.stdin)
+          assert data['summary']['total'] == 0, f\"Expected 0 findings but got {data['summary']['total']}\"
+          print('✓ Clean file passed with 0 findings')
+          "
+
+      - name: Scanner lists rules
+        run: python scan.py --list-rules
+
+      - name: Scanner handles missing target
+        run: |
+          python scan.py nonexistent_path --json | python -c "
+          import json, sys
+          data = json.load(sys.stdin)
+          assert len(data['errors']) > 0, 'Expected error for missing path'
+          print('✓ Missing target handled gracefully')
+          "
